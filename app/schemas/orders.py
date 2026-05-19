@@ -125,6 +125,7 @@ class OrderOut(BaseModel):
     created_at: datetime
     expires_at: datetime
     confirmed_at: datetime | None
+    cancelled_at: datetime | None
     cancellation_reason: str | None
 
 
