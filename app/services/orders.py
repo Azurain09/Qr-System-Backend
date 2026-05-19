@@ -113,6 +113,7 @@ def order_query():
             joinedload(Order.breakfast_detail).joinedload(OrderDetailBreakfast.egg_prep_type),
             selectinload(Order.extra_details).joinedload(OrderDetailExtra.extra).joinedload(Extra.category),
             selectinload(Order.extra_details).joinedload(OrderDetailExtra.egg_prep_type),
+            selectinload(Order.history),
         )
     )
 
@@ -143,16 +144,28 @@ def find_latest_order_by_document(db: Session, document: str) -> Order | None:
 
 def list_confirmed_orders(db: Session) -> list[dict]:
     cleanup_expired_drafts(db)
-    today = now_lima().date()
+    current = now_lima()
+    today = current.date()
     orders = db.scalars(
         order_query()
         .where(Order.status != INTERNAL_DRAFT_STATUS)
-        .order_by(Order.confirmed_at.asc(), Order.created_at.asc())
+        .order_by(Order.confirmed_at.desc(), Order.created_at.desc())
     ).unique().all()
+
+    def delivered_more_than_30_seconds_ago(order: Order) -> bool:
+        if order.status != "Entregado":
+            return False
+        delivered_history = sorted(
+            (entry for entry in order.history if entry.status == "Entregado"),
+            key=lambda entry: entry.created_at,
+        )
+        return bool(delivered_history and (current - delivered_history[-1].created_at).total_seconds() >= 30)
+
     todays_orders = [
         order
         for order in orders
         if (order.confirmed_at or order.created_at).date() == today
+        and not delivered_more_than_30_seconds_ago(order)
     ]
     return [serialize_order(order) for order in todays_orders]
 
