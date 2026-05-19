@@ -22,10 +22,20 @@ from app.models import (
     Report,
     StaffUser,
 )
-from app.schemas.orders import OrderCreateIn, ReportOut, StaffUserIn
+from app.schemas.orders import ExtraSelectionIn, OrderCreateIn, ReportOut, StaffUserIn
 
 
-ORDER_STATUSES = ["Pendiente", "En preparacion", "En camino", "Entregado", "Cancelado"]
+ORDER_STATUSES = ["Pendiente", "En preparación", "Entregado"]
+INTERNAL_DRAFT_STATUS = "Borrador"
+STATUS_ALIASES = {
+    "Borrador": "Pendiente",
+    "En preparacion": "En preparación",
+    "En preparación": "En preparación",
+    "En camino": "En preparación",
+    "Cancelado": "Pendiente",
+    "Pendiente": "Pendiente",
+    "Entregado": "Entregado",
+}
 CANCELLATION_REASONS = [
     "Pedido duplicado",
     "Retiro del huesped antes de recibir el desayuno",
@@ -39,13 +49,17 @@ CANCELLATION_REASONS = [
 def cleanup_expired_drafts(db: Session) -> int:
     current = now_lima()
     expired = db.scalars(
-        select(Order).where(Order.status == "Borrador", Order.expires_at < current)
+        select(Order).where(Order.status == INTERNAL_DRAFT_STATUS, Order.expires_at < current)
     ).all()
     for order in expired:
         db.delete(order)
     if expired:
         db.commit()
     return len(expired)
+
+
+def normalize_status(status: str) -> str:
+    return STATUS_ALIASES.get(status, status)
 
 
 def validate_guest_open() -> None:
@@ -67,7 +81,7 @@ def serialize_order(order: Order) -> dict:
         "table_number": order.table_number,
         "room_number": order.room_number,
         "claimed_included": order.claimed_included,
-        "status": order.status,
+        "status": normalize_status(order.status),
         "breakfast_type": order.breakfast_detail.breakfast_type.name,
         "egg_prep": order.breakfast_detail.egg_prep_type.name if order.breakfast_detail.egg_prep_type else None,
         "extras": [
@@ -118,7 +132,7 @@ def find_latest_order_by_document(db: Session, document: str) -> Order | None:
     orders = db.scalars(
         order_query()
         .join(Guest)
-        .where(Guest.document == document, Order.status != "Cancelado")
+        .where(Guest.document == document)
         .order_by(Order.created_at.desc())
     ).unique().all()
     for order in orders:
@@ -129,12 +143,18 @@ def find_latest_order_by_document(db: Session, document: str) -> Order | None:
 
 def list_confirmed_orders(db: Session) -> list[dict]:
     cleanup_expired_drafts(db)
+    today = now_lima().date()
     orders = db.scalars(
         order_query()
-        .where(Order.status != "Borrador")
+        .where(Order.status != INTERNAL_DRAFT_STATUS)
         .order_by(Order.confirmed_at.asc(), Order.created_at.asc())
     ).unique().all()
-    return [serialize_order(order) for order in orders]
+    todays_orders = [
+        order
+        for order in orders
+        if (order.confirmed_at or order.created_at).date() == today
+    ]
+    return [serialize_order(order) for order in todays_orders]
 
 
 def create_draft_order(db: Session, payload: OrderCreateIn) -> Order:
@@ -169,7 +189,7 @@ def create_draft_order(db: Session, payload: OrderCreateIn) -> Order:
         table_number=payload.table_number if payload.delivery_location == "Restaurante" else None,
         room_number=payload.room_number if payload.delivery_location == "Habitacion" else None,
         claimed_included=payload.claimed_included,
-        status="Borrador",
+        status=INTERNAL_DRAFT_STATUS,
         created_at=now_lima(),
         expires_at=now_lima() + timedelta(minutes=settings.pending_expiry_minutes),
     )
@@ -206,7 +226,7 @@ def create_draft_order(db: Session, payload: OrderCreateIn) -> Order:
 def confirm_order(db: Session, order_id: int) -> Order:
     cleanup_expired_drafts(db)
     order = get_order_or_404(db, order_id)
-    if order.status != "Borrador":
+    if order.status != INTERNAL_DRAFT_STATUS:
         return order
     if order.expires_at < now_lima():
         db.delete(order)
@@ -219,19 +239,52 @@ def confirm_order(db: Session, order_id: int) -> Order:
     return get_order_or_404(db, order.id)
 
 
+def append_order_extras(db: Session, order_id: int, extras: list[ExtraSelectionIn]) -> Order:
+    validate_guest_open()
+    cleanup_expired_drafts(db)
+    order = get_order_or_404(db, order_id)
+    if order.status == INTERNAL_DRAFT_STATUS:
+        raise HTTPException(status_code=409, detail="Confirma el pedido antes de agregar mas adicionales")
+    if order.status == "Entregado":
+        raise HTTPException(status_code=409, detail="El pedido ya fue entregado")
+    for selected in extras:
+        extra = db.get(Extra, selected.extra_id)
+        if not extra or not extra.is_active:
+            raise HTTPException(status_code=422, detail="Adicional no disponible")
+        if extra.requires_egg_prep and not selected.egg_prep_type_id:
+            raise HTTPException(status_code=422, detail="Completar todos los campos")
+        existing = next(
+            (
+                detail
+                for detail in order.extra_details
+                if detail.extra_id == selected.extra_id
+                and detail.egg_prep_type_id == selected.egg_prep_type_id
+                and not detail.is_cancelled
+            ),
+            None,
+        )
+        if existing:
+            existing.quantity += selected.quantity
+        else:
+            db.add(
+                OrderDetailExtra(
+                    order_id=order.id,
+                    extra_id=selected.extra_id,
+                    quantity=selected.quantity,
+                    egg_prep_type_id=selected.egg_prep_type_id,
+                    is_cancelled=False,
+                )
+            )
+    db.commit()
+    return get_order_or_404(db, order.id)
+
+
 def update_status(db: Session, order_id: int, status: str, reason: str | None = None) -> Order:
     validate_cook_open()
+    status = normalize_status(status)
     if status not in ORDER_STATUSES:
         raise HTTPException(status_code=422, detail="Estado invalido")
     order = get_order_or_404(db, order_id)
-    if status == "Cancelado":
-        if order.status != "Pendiente":
-            raise HTTPException(status_code=409, detail="Solo se puede cancelar mientras el pedido esta pendiente")
-        if reason not in CANCELLATION_REASONS:
-            raise HTTPException(status_code=422, detail="Motivo de cancelacion invalido")
-        order.cancelled_at = now_lima()
-        order.cancellation_reason = reason
-        db.add(Cancellation(order_id=order.id, reason=reason, created_at=now_lima()))
     order.status = status
     order.history.append(OrderStatusHistory(status=status, created_at=now_lima()))
     db.commit()
@@ -259,7 +312,7 @@ def cancel_extra(db: Session, detail_id: int, reason: str) -> Order:
 def daily_report(db: Session, date_value: str | None = None) -> ReportOut:
     cleanup_expired_drafts(db)
     report_date = date_value or now_lima().date().isoformat()
-    orders = db.scalars(order_query().where(Order.status != "Borrador")).unique().all()
+    orders = db.scalars(order_query().where(Order.status != INTERNAL_DRAFT_STATUS)).unique().all()
     filtered = [
         order
         for order in orders
@@ -297,14 +350,14 @@ def daily_report(db: Session, date_value: str | None = None) -> ReportOut:
 
 def dashboard_report(db: Session, date_value: str | None = None) -> dict:
     cleanup_expired_drafts(db)
-    all_orders = db.scalars(order_query().where(Order.status != "Borrador")).unique().all()
+    all_orders = db.scalars(order_query().where(Order.status != INTERNAL_DRAFT_STATUS)).unique().all()
     orders = [
         order
         for order in all_orders
         if not date_value or (order.confirmed_at or order.created_at).date().isoformat() == date_value
     ]
     category_names = ["Desayunos", "Bebidas", "Panes", "Huevos", "Otros"]
-    status_labels = ["Completados", "En preparacion", "Cancelados"]
+    status_labels = ["Completados", "En preparación"]
     status_by_category = {category: {status: 0 for status in status_labels} for category in category_names}
     category_mix = Counter()
     top_products = Counter()
@@ -328,18 +381,10 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
         orders_by_day[day_label] += 1
         if order.table_number:
             active_tables[f"Mesa {order.table_number}"] += 1
-        order_status_group = "Cancelados" if order.status == "Cancelado" else "Completados" if order.status == "Entregado" else "En preparacion"
+        order_status_group = "Completados" if order.status == "Entregado" else "En preparación"
         category_mix["Desayunos"] += 1
         status_by_category["Desayunos"][order_status_group] += 1
         top_products[order.breakfast_detail.breakfast_type.name] += 1
-        if order.status == "Cancelado" and order.cancellation_reason:
-            latest_cancellations.append(
-                {
-                    "order": f"#CQC-202-{order.id:05d}",
-                    "reason": order.cancellation_reason,
-                    "datetime": event_time.strftime("%d %b %Y, %I:%M %p"),
-                }
-            )
         if order.status == "Entregado" and order.confirmed_at:
             delivered_history = [entry for entry in order.history if entry.status == "Entregado"]
             if delivered_history:
@@ -358,8 +403,8 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
         "metrics": {
             "total_orders": len(orders),
             "completed_orders": sum(1 for order in orders if order.status == "Entregado"),
-            "in_preparation_orders": sum(1 for order in orders if order.status in {"Pendiente", "En preparacion", "En camino"}),
-            "cancelled_orders": sum(1 for order in orders if order.status == "Cancelado"),
+            "in_preparation_orders": sum(1 for order in orders if normalize_status(order.status) in {"Pendiente", "En preparación"}),
+            "cancelled_orders": 0,
             "average_minutes": round(sum(completed_minutes) / len(completed_minutes)) if completed_minutes else 0,
         },
         "category_mix": dict(category_mix),

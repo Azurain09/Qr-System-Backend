@@ -8,6 +8,7 @@ from app.core.time import cook_is_open, guest_is_open
 from app.database import get_db
 from app.models import BreakfastType, EggPrepType, Extra, Ingredient, StaffUser
 from app.schemas.orders import (
+    AddExtrasIn,
     AvailabilityUpdateIn,
     ExtraCancelIn,
     OrderCreateIn,
@@ -27,6 +28,7 @@ from app.services.orders import (
     dashboard_report,
     get_order_or_404,
     find_latest_order_by_document,
+    append_order_extras,
     list_confirmed_orders,
     purge_all_order_data,
     serialize_order,
@@ -122,6 +124,15 @@ def create_order(payload: OrderCreateIn, db: Session = Depends(get_db)) -> dict:
 @router.post("/orders/{order_id}/confirm")
 async def confirm(order_id: int, db: Session = Depends(get_db)) -> dict:
     order = confirm_order(db, order_id)
+    data = serialize_order(order)
+    await manager.broadcast_kitchen({"type": "orders_changed", "order": data})
+    await manager.broadcast_order(order.id, {"type": "status_changed", "order": data})
+    return data
+
+
+@router.post("/orders/{order_id}/extras")
+async def add_order_extras(order_id: int, payload: AddExtrasIn, db: Session = Depends(get_db)) -> dict:
+    order = append_order_extras(db, order_id, payload.extras)
     data = serialize_order(order)
     await manager.broadcast_kitchen({"type": "orders_changed", "order": data})
     await manager.broadcast_order(order.id, {"type": "status_changed", "order": data})
