@@ -152,20 +152,20 @@ def list_confirmed_orders(db: Session) -> list[dict]:
         .order_by(Order.confirmed_at.desc(), Order.created_at.desc())
     ).unique().all()
 
-    def delivered_more_than_30_seconds_ago(order: Order) -> bool:
+    def delivered_more_than_20_seconds_ago(order: Order) -> bool:
         if order.status != "Entregado":
             return False
         delivered_history = sorted(
             (entry for entry in order.history if entry.status == "Entregado"),
             key=lambda entry: entry.created_at,
         )
-        return bool(delivered_history and (current - delivered_history[-1].created_at).total_seconds() >= 30)
+        return bool(delivered_history and (current - delivered_history[-1].created_at).total_seconds() >= 20)
 
     todays_orders = [
         order
         for order in orders
         if (order.confirmed_at or order.created_at).date() == today
-        and not delivered_more_than_30_seconds_ago(order)
+        and not delivered_more_than_20_seconds_ago(order)
     ]
     return [serialize_order(order) for order in todays_orders]
 
