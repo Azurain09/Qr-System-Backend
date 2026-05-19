@@ -24,10 +24,10 @@ DEMO_PREFIX = "98"
 DEMO_ROWS = [
     ("Julio Rivera Vargas", "Entregado", "Habitacion", None, "203", "Americano", "Fritos", ["Naranja", "Cafe"], 12),
     ("Ana Soto Paredes", "Entregado", "Restaurante", 3, None, "Continental", "Revueltos", ["Papaya", "Con jamon y queso"], 9),
-    ("Maria Quispe Rojas", "En preparacion", "Restaurante", 5, None, "Dietetico", None, ["Yogurt pequeno"], 5),
-    ("Carlos Huaman Vera", "Cancelado", "Habitacion", None, "205", "Americano", "Hervidos", ["Cafe"], 7),
+    ("Maria Quispe Rojas", "En preparación", "Restaurante", 5, None, "Dietetico", None, ["Yogurt pequeno"], 5),
+    ("Carlos Huaman Vera", "Pendiente", "Habitacion", None, "205", "Americano", "Hervidos", ["Cafe"], 7),
     ("Lucia Torres Nina", "Entregado", "Restaurante", 7, None, "Continental", "Fritos", ["Pina", "Huevos adicionales"], 15),
-    ("Pedro Salas Cueva", "En camino", "Habitacion", None, "301", "Dietetico", None, ["Ensalada de frutas"], 8),
+    ("Pedro Salas Cueva", "En preparación", "Habitacion", None, "301", "Dietetico", None, ["Ensalada de frutas"], 8),
     ("Rosa Delgado Marin", "Entregado", "Restaurante", 1, None, "Americano", "Escalfados", ["Fresa"], 10),
     ("Miguel Castro Leon", "Pendiente", "Habitacion", None, "102", "Continental", "Revueltos", ["Leche"], 4),
 ]
@@ -88,8 +88,8 @@ def seed_demo_orders():
                 created_at=order_time,
                 expires_at=order_time + timedelta(minutes=7),
                 confirmed_at=order_time + timedelta(minutes=1),
-                cancelled_at=order_time + timedelta(minutes=6) if status == "Cancelado" else None,
-                cancellation_reason=CANCEL_REASONS[index % len(CANCEL_REASONS)] if status == "Cancelado" else None,
+                cancelled_at=None,
+                cancellation_reason=None,
             )
             db.add(order)
             db.flush()
@@ -97,15 +97,10 @@ def seed_demo_orders():
             egg = get_by_name(eggs, egg_name) if egg_name else None
             db.add(OrderDetailBreakfast(order_id=order.id, breakfast_type_id=breakfast.id, egg_prep_type_id=egg.id if egg else None))
             db.add(OrderStatusHistory(order_id=order.id, status="Pendiente", created_at=order.confirmed_at))
-            if status in {"En preparacion", "En camino", "Entregado"}:
-                db.add(OrderStatusHistory(order_id=order.id, status="En preparacion", created_at=order.confirmed_at + timedelta(minutes=4)))
-            if status in {"En camino", "Entregado"}:
-                db.add(OrderStatusHistory(order_id=order.id, status="En camino", created_at=order.confirmed_at + timedelta(minutes=8)))
+            if status in {"En preparación", "Entregado"}:
+                db.add(OrderStatusHistory(order_id=order.id, status="En preparación", created_at=order.confirmed_at + timedelta(minutes=4)))
             if status == "Entregado":
                 db.add(OrderStatusHistory(order_id=order.id, status="Entregado", created_at=order.confirmed_at + timedelta(minutes=12 + (index % 8))))
-            if status == "Cancelado":
-                db.add(OrderStatusHistory(order_id=order.id, status="Cancelado", created_at=order.cancelled_at))
-                db.add(Cancellation(order_id=order.id, reason=order.cancellation_reason, created_at=order.cancelled_at))
             for extra_name in extra_names:
                 extra = get_by_name(extras, extra_name)
                 db.add(OrderDetailExtra(order_id=order.id, extra_id=extra.id, quantity=1 + (index % 2), egg_prep_type_id=egg.id if extra.requires_egg_prep and egg else None))

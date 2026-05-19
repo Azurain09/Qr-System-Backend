@@ -39,6 +39,10 @@ class ConfirmOrderIn(BaseModel):
     order_id: int
 
 
+class AddExtrasIn(BaseModel):
+    extras: list[ExtraSelectionIn]
+
+
 class StatusUpdateIn(BaseModel):
     status: str
     reason: str | None = None
