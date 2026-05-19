@@ -32,17 +32,16 @@ STATUS_ALIASES = {
     "En preparacion": "En preparación",
     "En preparación": "En preparación",
     "En camino": "En preparación",
-    "Cancelado": "Pendiente",
+    "Cancelado": "Cancelado",
     "Pendiente": "Pendiente",
     "Entregado": "Entregado",
 }
 CANCELLATION_REASONS = [
-    "Pedido duplicado",
-    "Retiro del huesped antes de recibir el desayuno",
-    "Agotamiento de insumos",
-    "Error en el pedido",
-    "Imposibilidad de preparacion",
-    "Cambio de decision del huesped",
+    "Pedido realizado por error",
+    "Cambios de planes",
+    "Tiempo de espera",
+    "Problema con el pedido",
+    "Otro motivo",
 ]
 
 
@@ -100,6 +99,7 @@ def serialize_order(order: Order) -> dict:
         "created_at": order.created_at,
         "expires_at": order.expires_at,
         "confirmed_at": order.confirmed_at,
+        "cancelled_at": order.cancelled_at,
         "cancellation_reason": order.cancellation_reason,
     }
 
@@ -245,6 +245,8 @@ def append_order_extras(db: Session, order_id: int, extras: list[ExtraSelectionI
     order = get_order_or_404(db, order_id)
     if order.status == INTERNAL_DRAFT_STATUS:
         raise HTTPException(status_code=409, detail="Confirma el pedido antes de agregar mas adicionales")
+    if order.status == "Cancelado":
+        raise HTTPException(status_code=409, detail="El pedido fue cancelado")
     if order.status == "Entregado":
         raise HTTPException(status_code=409, detail="El pedido ya fue entregado")
     for selected in extras:
@@ -281,10 +283,26 @@ def append_order_extras(db: Session, order_id: int, extras: list[ExtraSelectionI
 
 def update_status(db: Session, order_id: int, status: str, reason: str | None = None) -> Order:
     validate_cook_open()
+    if status == "Cancelado":
+        order = get_order_or_404(db, order_id)
+        if order.status == "Cancelado":
+            return order
+        if not reason:
+            raise HTTPException(status_code=422, detail="Motivo de cancelacion invalido")
+        order.status = "Cancelado"
+        order.cancelled_at = now_lima()
+        order.cancellation_reason = reason
+        order.history.append(OrderStatusHistory(status="Cancelado", created_at=now_lima()))
+        db.add(Cancellation(order_id=order.id, reason=reason, created_at=now_lima()))
+        db.commit()
+        return get_order_or_404(db, order.id)
+
     status = normalize_status(status)
     if status not in ORDER_STATUSES:
         raise HTTPException(status_code=422, detail="Estado invalido")
     order = get_order_or_404(db, order_id)
+    if order.status == "Cancelado":
+        raise HTTPException(status_code=409, detail="El pedido fue cancelado")
     order.status = status
     order.history.append(OrderStatusHistory(status=status, created_at=now_lima()))
     db.commit()
