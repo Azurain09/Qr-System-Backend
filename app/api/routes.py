@@ -197,6 +197,16 @@ async def update_availability(slug: str, kind: str, item_id: int, payload: Avail
     if not item:
         raise HTTPException(status_code=404, detail="Item no encontrado")
     item.is_active = payload.is_active
+    if kind in {"extra", "ingredient"}:
+        linked_name = item.name
+        if kind == "extra":
+            linked_ingredient = db.scalar(select(Ingredient).where(Ingredient.name == linked_name))
+            if linked_ingredient:
+                linked_ingredient.is_active = payload.is_active
+        else:
+            linked_extras = db.scalars(select(Extra).where(Extra.name == linked_name)).all()
+            for linked_extra in linked_extras:
+                linked_extra.is_active = payload.is_active
     db.commit()
     await manager.broadcast_kitchen({"type": "catalog_changed"})
     await manager.broadcast_catalog({"type": "catalog_changed"})

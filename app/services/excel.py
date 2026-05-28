@@ -51,6 +51,8 @@ def write_extra_details(sheet, row: int, details: list[dict]) -> int:
             sheet.cell(row=row, column=4, value=detail.get("quantity"))
             sheet.cell(row=row, column=5, value=detail.get("unit_price"))
             sheet.cell(row=row, column=6, value=detail.get("total"))
+            sheet.cell(row=row, column=5).number_format = '"S/" #,##0.00'
+            sheet.cell(row=row, column=6).number_format = '"S/" #,##0.00'
             row += 1
     else:
         sheet.cell(row=row, column=1, value="Sin datos")

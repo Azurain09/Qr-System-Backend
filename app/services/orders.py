@@ -429,7 +429,7 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
     category_mix = Counter()
     top_products = Counter()
     active_tables = Counter()
-    orders_by_day = Counter()
+    orders_by_hour = Counter()
     latest_cancellations = []
     completed_minutes = []
 
@@ -444,8 +444,7 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
 
     for order in orders:
         event_time = order.confirmed_at or order.created_at
-        day_label = event_time.date().isoformat()
-        orders_by_day[day_label] += 1
+        orders_by_hour[f"{event_time.hour:02d}:00"] += 1
         if order.table_number:
             active_tables[f"Mesa {order.table_number}"] += 1
         order_status_group = "Completados" if order.status == "Entregado" else "En preparación"
@@ -465,7 +464,7 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
             status_by_category[mapped][order_status_group] += detail.quantity
             top_products[detail.extra.name] += detail.quantity
 
-    ordered_days = dict(sorted(orders_by_day.items())[-8:])
+    ordered_hours = dict(sorted(orders_by_hour.items()))
     return {
         "metrics": {
             "total_orders": len(orders),
@@ -476,7 +475,7 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
         },
         "category_mix": dict(category_mix),
         "status_by_category": status_by_category,
-        "orders_by_day": ordered_days,
+        "orders_by_hour": ordered_hours,
         "top_products": [{"name": name, "quantity": quantity} for name, quantity in top_products.most_common(5)],
         "active_tables": [{"name": name, "orders": quantity} for name, quantity in active_tables.most_common(5)],
         "latest_cancellations": latest_cancellations[-5:],
