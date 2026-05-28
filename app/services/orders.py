@@ -37,10 +37,8 @@ STATUS_ALIASES = {
     "Entregado": "Entregado",
 }
 CANCELLATION_REASONS = [
-    "Pedido realizado por error",
+    "Solicitud del huésped",
     "Cambios de planes",
-    "Tiempo de espera",
-    "Problema con el pedido",
     "Otro motivo",
 ]
 
@@ -245,9 +243,9 @@ def confirm_order(db: Session, order_id: int) -> Order:
         db.delete(order)
         db.commit()
         raise HTTPException(status_code=410, detail="El pedido expiro")
-    order.status = "Pendiente"
+    order.status = "En preparación"
     order.confirmed_at = now_lima()
-    order.history.append(OrderStatusHistory(status="Pendiente", created_at=now_lima()))
+    order.history.append(OrderStatusHistory(status="En preparación", created_at=now_lima()))
     db.commit()
     return get_order_or_404(db, order.id)
 
