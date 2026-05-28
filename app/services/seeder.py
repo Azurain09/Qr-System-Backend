@@ -51,6 +51,7 @@ INGREDIENTS = [
     "Naranja",
     "Papaya",
     "Pina",
+    "Mango",
     "Fresa",
 ]
 
@@ -68,8 +69,10 @@ def seed_database(db: Session) -> None:
     if not db.scalar(select(Table).limit(1)):
         db.add_all(Table(number=number, is_active=True) for number in range(1, 8))
 
-    if not db.scalar(select(Ingredient).limit(1)):
-        db.add_all(Ingredient(name=name, is_active=True) for name in INGREDIENTS)
+    existing_ingredients = {name for (name,) in db.execute(select(Ingredient.name)).all()}
+    missing_ingredients = [name for name in INGREDIENTS if name not in existing_ingredients]
+    if missing_ingredients:
+        db.add_all(Ingredient(name=name, is_active=True) for name in missing_ingredients)
 
     if not db.scalar(select(ExtraCategory).limit(1)):
         for category_name, extras in EXTRAS.items():
