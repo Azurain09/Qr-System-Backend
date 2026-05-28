@@ -135,5 +135,6 @@ class ReportOut(BaseModel):
     attended_by_origin: dict[str, int]
     breakfast_types: dict[str, int]
     extras: dict[str, int]
+    extra_details: list[dict]
     peak_hours: dict[str, int]
     cancellation_reasons: dict[str, int]

@@ -41,6 +41,31 @@ CANCELLATION_REASONS = [
     "Cambios de planes",
     "Otro motivo",
 ]
+EXTRA_PRICES = {
+    "Solo": 2,
+    "Con mantequilla y mermelada": 4,
+    "Solo mantequilla": 3,
+    "Solo mermelada": 3,
+    "Con jamon y queso": 6,
+    "Solo jamon": 4,
+    "Solo queso": 4,
+    "Naranja": 6,
+    "Papaya": 6,
+    "Pina": 6,
+    "Mango": 6,
+    "Fresa": 7,
+    "Mixto de la casa": 8,
+    "Ensalada de frutas": 10,
+    "Ensalada fresca": 9,
+    "Americano adicional": 18,
+    "Continental adicional": 18,
+    "Dietetico adicional": 18,
+    "Huevos adicionales": 8,
+    "Cafe": 5,
+    "Leche": 5,
+    "Yogurt pequeno": 6,
+    "Yogurt grande": 9,
+}
 
 
 def cleanup_expired_drafts(db: Session) -> int:
@@ -351,6 +376,7 @@ def daily_report(db: Session, date_value: str | None = None) -> ReportOut:
     origin = Counter(order.delivery_location for order in filtered)
     breakfasts = Counter(order.breakfast_detail.breakfast_type.name for order in filtered)
     extras = Counter()
+    extra_details: list[dict] = []
     peak_hours = Counter()
     cancellations = Counter()
 
@@ -365,6 +391,17 @@ def daily_report(db: Session, date_value: str | None = None) -> ReportOut:
                     cancellations[detail.cancellation_reason] += detail.quantity
                 continue
             extras[detail.extra.name] += detail.quantity
+            unit_price = EXTRA_PRICES.get(detail.extra.name, 0)
+            extra_details.append(
+                {
+                    "guest_name": order.guest.full_name,
+                    "document": order.guest.document,
+                    "extra_name": detail.extra.name,
+                    "quantity": detail.quantity,
+                    "unit_price": unit_price,
+                    "total": unit_price * detail.quantity,
+                }
+            )
 
     return ReportOut(
         date=report_date,
@@ -372,6 +409,7 @@ def daily_report(db: Session, date_value: str | None = None) -> ReportOut:
         attended_by_origin=dict(origin),
         breakfast_types=dict(breakfasts),
         extras=dict(extras),
+        extra_details=extra_details,
         peak_hours=dict(sorted(peak_hours.items())),
         cancellation_reasons=dict(cancellations),
     )
