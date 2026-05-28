@@ -20,7 +20,7 @@ class Settings:
     guest_end: time = time(11, 0)
     cook_start: time = time(5, 30)
     cook_end: time = time(11, 0)
-    pending_expiry_minutes: int = 7
+    pending_expiry_minutes: int = 3
     cook_slug: str = "cocina-huaca-7429"
     reception_slug: str = "recepcion-sol-3186"
     manager_slug: str = "gerencia-cacique-9051"
