@@ -6,9 +6,9 @@ from app.models import BreakfastType, EggPrepType, Extra, ExtraCategory, Ingredi
 
 
 BREAKFASTS = [
-    ("Americano", "1 jugo, 1 cafe, 2 huevos, 2 panes con mantequilla y mermelada.", True),
-    ("Continental", "1 jugo, 1 cafe, 2 panes con jamon y queso, 2 huevos.", True),
-    ("Dietetico", "1 jugo, 1 cafe, 1 ensalada de frutas, yogurt pequeno, 2 tostadas con mantequilla y mermelada.", False),
+    ("Americano", "1 jugo, 1 café, 2 huevos, 2 panes con mantequilla y mermelada.", True),
+    ("Continental", "1 jugo, 1 café, 2 panes con jamón y queso, 2 huevos.", True),
+    ("Dietetico", "1 jugo, 1 café, 1 ensalada de frutas, yogurt pequeño, 2 tostadas con mantequilla y mermelada.", False),
 ]
 
 EGG_PREPS = ["Fritos", "Hervidos", "Revueltos", "Escalfados"]
@@ -92,8 +92,8 @@ def seed_database(db: Session) -> None:
     if not db.scalar(select(StaffUser).limit(1)):
         db.add_all(
             [
-                StaffUser(name="Cocinera turno manana", dni="00000001", role="cook", is_active=True, created_at=now_lima()),
-                StaffUser(name="Recepcion principal", dni="00000002", role="receptionist", is_active=True, created_at=now_lima()),
+                StaffUser(name="Cocinera turno mañana", dni="00000001", role="cook", is_active=True, created_at=now_lima()),
+                StaffUser(name="Recepción principal", dni="00000002", role="receptionist", is_active=True, created_at=now_lima()),
                 StaffUser(name="Gerencia Hotel Cacique", dni="00000003", role="manager", is_active=True, created_at=now_lima()),
             ]
         )

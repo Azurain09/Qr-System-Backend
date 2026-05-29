@@ -8,6 +8,19 @@ from app.schemas.orders import ReportOut
 
 HEADER_FILL = PatternFill("solid", fgColor="C7B7F3")
 HEADER_FONT = Font(color="2B0B5F", bold=True)
+DISPLAY_NAMES = {
+    "Cafe": "Café",
+    "Con jamon y queso": "Con jamón y queso",
+    "Solo jamon": "Solo jamón",
+    "Dietetico": "Dietético",
+    "Dietetico adicional": "Dietético adicional",
+    "Pina": "Piña",
+    "Yogurt pequeno": "Yogurt pequeño",
+}
+
+
+def display_name(value: str | None) -> str | None:
+    return DISPLAY_NAMES.get(value or "", value)
 
 
 def style_header(sheet, row: int) -> None:
@@ -25,7 +38,7 @@ def write_counter_section(sheet, row: int, title: str, data: dict[str, int]) -> 
     row += 1
     if data:
         for label, value in data.items():
-            sheet.cell(row=row, column=1, value=label)
+            sheet.cell(row=row, column=1, value=display_name(label))
             sheet.cell(row=row, column=2, value=value)
             row += 1
     else:
@@ -47,7 +60,7 @@ def write_extra_details(sheet, row: int, details: list[dict]) -> int:
         for detail in details:
             sheet.cell(row=row, column=1, value=detail.get("guest_name"))
             sheet.cell(row=row, column=2, value=detail.get("document"))
-            sheet.cell(row=row, column=3, value=detail.get("extra_name"))
+            sheet.cell(row=row, column=3, value=display_name(detail.get("extra_name")))
             sheet.cell(row=row, column=4, value=detail.get("quantity"))
             sheet.cell(row=row, column=5, value=detail.get("unit_price"))
             sheet.cell(row=row, column=6, value=detail.get("total"))
@@ -73,9 +86,9 @@ def report_to_excel(report: ReportOut) -> BytesIO:
     row = write_counter_section(sheet, row, "Atendidos por origen", report.attended_by_origin)
     row = write_counter_section(sheet, row, "Tipos de desayuno", report.breakfast_types)
     row = write_extra_details(sheet, row, report.extra_details)
-    row = write_counter_section(sheet, row, "Adicionales mas pedidos", report.extras)
+    row = write_counter_section(sheet, row, "Adicionales más pedidos", report.extras)
     row = write_counter_section(sheet, row, "Horas pico", report.peak_hours)
-    write_counter_section(sheet, row, "Motivos de cancelacion", report.cancellation_reasons)
+    write_counter_section(sheet, row, "Motivos de cancelación", report.cancellation_reasons)
 
     widths = {
         "A": 32,
