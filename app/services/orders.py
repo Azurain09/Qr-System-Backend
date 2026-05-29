@@ -200,10 +200,10 @@ def create_draft_order(db: Session, payload: OrderCreateIn) -> Order:
     if payload.delivery_location not in ("Restaurante", "Habitacion"):
         raise HTTPException(status_code=422, detail="Completar todos los campos")
     if payload.delivery_location == "Restaurante" and payload.table_number not in range(1, 8):
-        raise HTTPException(status_code=422, detail="La mesa debe ser un numero entre 1 y 7")
+        raise HTTPException(status_code=422, detail="La mesa debe ser un número entre 1 y 7")
     if payload.delivery_location == "Habitacion":
         if not payload.room_number or not payload.room_number.isdigit() or len(payload.room_number) != 3:
-            raise HTTPException(status_code=422, detail="La habitacion debe tener 3 digitos")
+            raise HTTPException(status_code=422, detail="La habitación debe tener 3 dígitos")
 
     breakfast = db.get(BreakfastType, payload.breakfast_type_id)
     if not breakfast or not breakfast.is_active:
@@ -280,7 +280,7 @@ def append_order_extras(db: Session, order_id: int, extras: list[ExtraSelectionI
     cleanup_expired_drafts(db)
     order = get_order_or_404(db, order_id)
     if order.status == INTERNAL_DRAFT_STATUS:
-        raise HTTPException(status_code=409, detail="Confirma el pedido antes de agregar mas adicionales")
+        raise HTTPException(status_code=409, detail="Confirma el pedido antes de agregar más adicionales")
     if order.status == "Cancelado":
         raise HTTPException(status_code=409, detail="El pedido fue cancelado")
     if order.status == "Entregado":
@@ -324,7 +324,7 @@ def update_status(db: Session, order_id: int, status: str, reason: str | None = 
         if order.status == "Cancelado":
             return order
         if not reason:
-            raise HTTPException(status_code=422, detail="Motivo de cancelacion invalido")
+            raise HTTPException(status_code=422, detail="Motivo de cancelación inválido")
         order.status = "Cancelado"
         order.cancelled_at = now_lima()
         order.cancellation_reason = reason
@@ -348,7 +348,7 @@ def update_status(db: Session, order_id: int, status: str, reason: str | None = 
 def cancel_extra(db: Session, detail_id: int, reason: str) -> Order:
     validate_cook_open()
     if reason not in CANCELLATION_REASONS:
-        raise HTTPException(status_code=422, detail="Motivo de cancelacion invalido")
+        raise HTTPException(status_code=422, detail="Motivo de cancelación inválido")
     detail = db.scalar(select(OrderDetailExtra).where(OrderDetailExtra.id == detail_id))
     if not detail:
         raise HTTPException(status_code=404, detail="Adicional no encontrado")

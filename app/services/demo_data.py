@@ -34,7 +34,7 @@ DEMO_ROWS = [
 
 CANCEL_REASONS = [
     "Pedido duplicado",
-    "Cambio de decision del huesped",
+    "Cambio de decisión del huésped",
     "Error en el pedido",
     "Agotamiento de insumos",
 ]
