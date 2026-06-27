@@ -9,6 +9,27 @@ class ExtraSelectionIn(BaseModel):
     egg_prep_type_id: int | None = None
 
 
+class DrinkSelectionIn(BaseModel):
+    kind: str
+    name: str
+    quantity: int = Field(ge=1, le=2)
+
+    @field_validator("kind")
+    @classmethod
+    def validate_kind(cls, value: str) -> str:
+        if value not in {"juice", "coffee"}:
+            raise ValueError("Tipo de bebida invalido")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def validate_drink_name(cls, value: str) -> str:
+        value = " ".join(value.strip().split())
+        if not value:
+            raise ValueError("Bebida invalida")
+        return value
+
+
 class OrderCreateIn(BaseModel):
     document: str
     full_name: str
@@ -18,6 +39,7 @@ class OrderCreateIn(BaseModel):
     claimed_included: bool
     breakfast_type_id: int
     egg_prep_type_id: int | None = None
+    included_drinks: list[DrinkSelectionIn] = []
     extras: list[ExtraSelectionIn] = []
 
     @field_validator("document")
@@ -59,8 +81,62 @@ class AvailabilityUpdateIn(BaseModel):
 class StaffUserIn(BaseModel):
     name: str
     dni: str
+    username: str
+    password: str | None = None
     role: str
     is_active: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def validate_staff_name(cls, value: str) -> str:
+        value = " ".join(value.strip().split())
+        if len(value) < 3 or any(character.isdigit() for character in value):
+            raise ValueError("Ingrese correctamente el nombre y los apellidos")
+        return value
+
+    @field_validator("dni")
+    @classmethod
+    def validate_staff_dni(cls, value: str) -> str:
+        if not value.isdigit() or len(value) != 8:
+            raise ValueError("El DNI debe contener 8 dígitos")
+        return value
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        value = value.strip().lower()
+        if len(value) < 4 or not value.replace("_", "").isalnum():
+            raise ValueError("Ingrese un usuario valido")
+        return value
+
+    @field_validator("role")
+    @classmethod
+    def validate_staff_role(cls, value: str) -> str:
+        allowed_roles = {"Cocina", "Recepción", "Gerencia"}
+        if value not in allowed_roles:
+            raise ValueError("Seleccione un rol válido")
+        return value
+
+
+class CatalogCreateIn(BaseModel):
+    kind: str
+    name: str
+
+    @field_validator("kind")
+    @classmethod
+    def validate_catalog_kind(cls, value: str) -> str:
+        allowed = {"juice", "egg", "bread", "salad", "ingredient", "supply"}
+        if value not in allowed:
+            raise ValueError("Tipo de opcion invalido")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def validate_catalog_name(cls, value: str) -> str:
+        value = " ".join(value.strip().split())
+        if len(value) < 3:
+            raise ValueError("Ingrese un nombre valido")
+        return value
 
 
 class PurgeOrdersIn(BaseModel):

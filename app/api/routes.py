@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import create_staff_token, require_staff_token, require_staff_websocket, verify_password
 from app.core.time import cook_is_open, guest_is_open
 from app.database import get_db
 from app.models import BreakfastType, EggPrepType, Extra, Ingredient, StaffUser
@@ -15,6 +17,7 @@ from app.schemas.orders import (
     PurgeOrdersIn,
     StaffUserIn,
     StatusUpdateIn,
+    CatalogCreateIn,
 )
 from app.services.excel import report_to_excel
 from app.services.orders import (
@@ -29,6 +32,7 @@ from app.services.orders import (
     get_order_or_404,
     find_latest_order_by_document,
     append_order_extras,
+    create_catalog_item,
     list_confirmed_orders,
     purge_all_order_data,
     serialize_order,
@@ -38,6 +42,12 @@ from app.services.orders import (
 from app.services.websocket_manager import manager
 
 router = APIRouter()
+
+
+class StaffLoginIn(BaseModel):
+    username: str | None = None
+    role: str
+    password: str
 
 
 def require_slug(role: str, slug: str) -> None:
@@ -109,6 +119,33 @@ def health() -> dict:
     }
 
 
+@router.post("/auth/staff")
+def staff_login(payload: StaffLoginIn, db: Session = Depends(get_db)) -> dict:
+    if payload.role not in {"cook", "reception", "manager"}:
+        raise HTTPException(status_code=422, detail="Rol interno invalido")
+    role_names = {
+        "cook": {"Cocina", "cook"},
+        "reception": {"Recepción", "Recepcion", "reception", "receptionist"},
+        "manager": {"Gerencia", "manager"},
+    }
+    default_usernames = {
+        "cook": "cocina",
+        "reception": "recepcion",
+        "manager": "gerencia",
+    }
+    username = (payload.username or default_usernames[payload.role]).strip().lower()
+    user = db.scalar(select(StaffUser).where(StaffUser.username == username))
+    if not user or not user.is_active or user.role not in role_names[payload.role]:
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+    if not verify_password(payload.password, user.password_hash or ""):
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos")
+    return {
+        "token": create_staff_token(payload.role),
+        "role": payload.role,
+        "expires_in_minutes": settings.staff_token_minutes,
+    }
+
+
 @router.get("/catalog")
 def get_catalog(db: Session = Depends(get_db)) -> dict:
     cleanup_expired_drafts(db)
@@ -152,16 +189,18 @@ def get_order_by_document(document: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/staff/{slug}/orders")
-def staff_orders(slug: str, db: Session = Depends(get_db)) -> dict:
+def staff_orders(slug: str, request: Request, db: Session = Depends(get_db)) -> dict:
     require_slug("cook", slug)
+    require_staff_token(request, "cook")
     if not cook_is_open():
         return {"is_open": False, "message": "Sistema fuera de servicio", "orders": []}
     return {"is_open": True, "orders": list_confirmed_orders(db), "cancellation_reasons": CANCELLATION_REASONS}
 
 
 @router.patch("/staff/{slug}/orders/{order_id}/status")
-async def staff_update_order(slug: str, order_id: int, payload: StatusUpdateIn, db: Session = Depends(get_db)) -> dict:
+async def staff_update_order(slug: str, order_id: int, payload: StatusUpdateIn, request: Request, db: Session = Depends(get_db)) -> dict:
     require_slug("cook", slug)
+    require_staff_token(request, "cook")
     order = update_status(db, order_id, payload.status, payload.reason)
     data = serialize_order(order)
     await manager.broadcast_kitchen({"type": "orders_changed", "order": data})
@@ -170,8 +209,9 @@ async def staff_update_order(slug: str, order_id: int, payload: StatusUpdateIn, 
 
 
 @router.patch("/staff/{slug}/extras/{detail_id}/cancel")
-async def staff_cancel_extra(slug: str, detail_id: int, payload: ExtraCancelIn, db: Session = Depends(get_db)) -> dict:
+async def staff_cancel_extra(slug: str, detail_id: int, payload: ExtraCancelIn, request: Request, db: Session = Depends(get_db)) -> dict:
     require_slug("cook", slug)
+    require_staff_token(request, "cook")
     order = cancel_extra(db, detail_id, payload.reason)
     data = serialize_order(order)
     await manager.broadcast_kitchen({"type": "orders_changed", "order": data})
@@ -180,8 +220,9 @@ async def staff_cancel_extra(slug: str, detail_id: int, payload: ExtraCancelIn, 
 
 
 @router.patch("/staff/{slug}/availability/{kind}/{item_id}")
-async def update_availability(slug: str, kind: str, item_id: int, payload: AvailabilityUpdateIn, db: Session = Depends(get_db)) -> dict:
+async def update_availability(slug: str, kind: str, item_id: int, payload: AvailabilityUpdateIn, request: Request, db: Session = Depends(get_db)) -> dict:
     require_slug("cook", slug)
+    require_staff_token(request, "cook")
     if not cook_is_open():
         raise HTTPException(status_code=403, detail="Sistema fuera de servicio")
     model_map = {
@@ -213,36 +254,53 @@ async def update_availability(slug: str, kind: str, item_id: int, payload: Avail
     return serialize_catalog(db)
 
 
+@router.post("/staff/{slug}/catalog-items")
+async def staff_create_catalog_item(slug: str, payload: CatalogCreateIn, request: Request, db: Session = Depends(get_db)) -> dict:
+    require_slug("cook", slug)
+    require_staff_token(request, "cook")
+    result = create_catalog_item(db, payload)
+    await manager.broadcast_kitchen({"type": "catalog_changed"})
+    await manager.broadcast_catalog({"type": "catalog_changed"})
+    return result
+
+
 @router.get("/reports/{slug}/daily")
-def report_daily(slug: str, date: str | None = None, db: Session = Depends(get_db)) -> dict:
+def report_daily(slug: str, request: Request, date: str | None = None, db: Session = Depends(get_db)) -> dict:
     if slug == settings.reception_slug:
         require_slug("reception", slug)
+        require_staff_token(request, "reception")
     elif slug == settings.manager_slug:
         require_slug("manager", slug)
+        require_staff_token(request, "manager")
     else:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
     return daily_report(db, date).model_dump()
 
 
 @router.get("/reports/{slug}/dashboard")
-def report_dashboard(slug: str, date: str | None = None, db: Session = Depends(get_db)) -> dict:
+def report_dashboard(slug: str, request: Request, date: str | None = None, db: Session = Depends(get_db)) -> dict:
     if slug == settings.reception_slug:
         require_slug("reception", slug)
+        require_staff_token(request, "reception")
     elif slug == settings.manager_slug:
         require_slug("manager", slug)
+        require_staff_token(request, "manager")
     elif slug == settings.cook_slug:
         require_slug("cook", slug)
+        require_staff_token(request, "cook")
     else:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
     return dashboard_report(db, date)
 
 
 @router.get("/reports/{slug}/daily.xlsx")
-def report_daily_xlsx(slug: str, date: str | None = None, db: Session = Depends(get_db)) -> StreamingResponse:
+def report_daily_xlsx(slug: str, request: Request, date: str | None = None, db: Session = Depends(get_db)) -> StreamingResponse:
     if slug == settings.reception_slug:
         require_slug("reception", slug)
+        require_staff_token(request, "reception")
     elif slug == settings.manager_slug:
         require_slug("manager", slug)
+        require_staff_token(request, "manager")
     else:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
     report = daily_report(db, date)
@@ -256,32 +314,36 @@ def report_daily_xlsx(slug: str, date: str | None = None, db: Session = Depends(
 
 
 @router.get("/manager/{slug}/staff")
-def list_staff(slug: str, db: Session = Depends(get_db)) -> list[dict]:
+def list_staff(slug: str, request: Request, db: Session = Depends(get_db)) -> list[dict]:
     require_slug("manager", slug)
+    require_staff_token(request, "manager")
     users = db.scalars(select(StaffUser).order_by(StaffUser.name)).all()
     return [
-        {"id": user.id, "name": user.name, "dni": user.dni, "role": user.role, "is_active": user.is_active}
+        {"id": user.id, "name": user.name, "dni": user.dni, "username": user.username, "role": user.role, "is_active": user.is_active}
         for user in users
     ]
 
 
 @router.post("/manager/{slug}/staff")
-def create_staff(slug: str, payload: StaffUserIn, db: Session = Depends(get_db)) -> dict:
+def create_staff(slug: str, payload: StaffUserIn, request: Request, db: Session = Depends(get_db)) -> dict:
     require_slug("manager", slug)
+    require_staff_token(request, "manager")
     user = upsert_staff(db, payload)
-    return {"id": user.id, "name": user.name, "dni": user.dni, "role": user.role, "is_active": user.is_active}
+    return {"id": user.id, "name": user.name, "dni": user.dni, "username": user.username, "role": user.role, "is_active": user.is_active}
 
 
 @router.put("/manager/{slug}/staff/{staff_id}")
-def update_staff(slug: str, staff_id: int, payload: StaffUserIn, db: Session = Depends(get_db)) -> dict:
+def update_staff(slug: str, staff_id: int, payload: StaffUserIn, request: Request, db: Session = Depends(get_db)) -> dict:
     require_slug("manager", slug)
+    require_staff_token(request, "manager")
     user = upsert_staff(db, payload, staff_id)
-    return {"id": user.id, "name": user.name, "dni": user.dni, "role": user.role, "is_active": user.is_active}
+    return {"id": user.id, "name": user.name, "dni": user.dni, "username": user.username, "role": user.role, "is_active": user.is_active}
 
 
 @router.post("/manager/{slug}/purge-orders")
-async def purge_orders(slug: str, payload: PurgeOrdersIn, db: Session = Depends(get_db)) -> dict:
+async def purge_orders(slug: str, payload: PurgeOrdersIn, request: Request, db: Session = Depends(get_db)) -> dict:
     require_slug("manager", slug)
+    require_staff_token(request, "manager")
     if payload.confirmation_phrase != "ELIMINAR PEDIDOS":
         raise HTTPException(status_code=422, detail="Frase de confirmacion invalida")
     counts = purge_all_order_data(db)
@@ -293,6 +355,8 @@ async def purge_orders(slug: str, payload: PurgeOrdersIn, db: Session = Depends(
 async def kitchen_ws(websocket: WebSocket, slug: str):
     if slug != settings.cook_slug:
         await websocket.close(code=1008)
+        return
+    if not await require_staff_websocket(websocket, "cook"):
         return
     await manager.connect_kitchen(websocket)
     try:

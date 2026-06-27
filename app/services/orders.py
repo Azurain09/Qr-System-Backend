@@ -1,5 +1,6 @@
 from collections import Counter
 from datetime import timedelta
+import json
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.config import settings
 from app.core.time import cook_is_open, guest_is_open, now_lima
+from app.core.security import hash_password
 from app.models import (
     BreakfastType,
     Cancellation,
@@ -22,7 +24,7 @@ from app.models import (
     Report,
     StaffUser,
 )
-from app.schemas.orders import ExtraSelectionIn, OrderCreateIn, ReportOut, StaffUserIn
+from app.schemas.orders import CatalogCreateIn, ExtraSelectionIn, OrderCreateIn, ReportOut, StaffUserIn
 
 
 ORDER_STATUSES = ["Pendiente", "En preparación", "Entregado"]
@@ -54,6 +56,9 @@ EXTRA_PRICES = {
     "Pina": 6,
     "Mango": 6,
     "Fresa": 7,
+    "Melon": 6,
+    "Sandia": 6,
+    "Surtido": 8,
     "Mixto de la casa": 8,
     "Ensalada de frutas": 10,
     "Ensalada fresca": 9,
@@ -95,6 +100,10 @@ def validate_cook_open() -> None:
 
 
 def serialize_order(order: Order) -> dict:
+    try:
+        included_drinks = json.loads(order.included_drinks_json or "[]")
+    except json.JSONDecodeError:
+        included_drinks = []
     return {
         "id": order.id,
         "guest_name": order.guest.full_name,
@@ -124,6 +133,7 @@ def serialize_order(order: Order) -> dict:
         "confirmed_at": order.confirmed_at,
         "cancelled_at": order.cancelled_at,
         "cancellation_reason": order.cancellation_reason,
+        "included_drinks": included_drinks,
     }
 
 
@@ -215,6 +225,22 @@ def create_draft_order(db: Session, payload: OrderCreateIn) -> Order:
         if not egg_prep or not egg_prep.is_active:
             raise HTTPException(status_code=422, detail="Preparacion de huevo no disponible")
 
+    juice_quantity = sum(drink.quantity for drink in payload.included_drinks if drink.kind == "juice")
+    coffee_quantity = sum(drink.quantity for drink in payload.included_drinks if drink.kind == "coffee")
+    if not 1 <= juice_quantity <= 2 or not 1 <= coffee_quantity <= 2:
+        raise HTTPException(status_code=422, detail="Debe seleccionar entre 1 y 2 jugos y entre 1 y 2 cafes")
+    juice_category = db.scalar(select(ExtraCategory).where(ExtraCategory.name == "Jugos"))
+    active_juice_names = {extra.name for extra in (juice_category.extras if juice_category else []) if extra.is_active}
+    for drink in payload.included_drinks:
+        if drink.kind == "juice":
+            ingredient = db.scalar(select(Ingredient).where(Ingredient.name == drink.name))
+            if drink.name not in active_juice_names or not ingredient or not ingredient.is_active:
+                raise HTTPException(status_code=422, detail="Jugo no disponible")
+        if drink.kind == "coffee":
+            required_ingredients = ["Cafe", "Leche"] if "Leche" in drink.name else ["Cafe"]
+            if any(db.scalar(select(Ingredient).where(Ingredient.name == name, Ingredient.is_active == True)) is None for name in required_ingredients):
+                raise HTTPException(status_code=422, detail="Cafe no disponible")
+
     guest = Guest(document=payload.document, full_name=payload.full_name, created_at=now_lima())
     db.add(guest)
     db.flush()
@@ -228,6 +254,7 @@ def create_draft_order(db: Session, payload: OrderCreateIn) -> Order:
         status=INTERNAL_DRAFT_STATUS,
         created_at=now_lima(),
         expires_at=now_lima() + timedelta(minutes=settings.pending_expiry_minutes),
+        included_drinks_json=json.dumps([drink.model_dump() for drink in payload.included_drinks], ensure_ascii=False),
     )
     db.add(order)
     db.flush()
@@ -501,12 +528,57 @@ def upsert_staff(db: Session, payload: StaffUserIn, staff_id: int | None = None)
         raise HTTPException(status_code=404, detail="Personal no encontrado")
     staff.name = payload.name.strip()
     staff.dni = payload.dni
+    staff.username = payload.username
+    if payload.password:
+        staff.password_hash = hash_password(payload.password)
+    elif not staff.password_hash:
+        staff.password_hash = hash_password(settings.staff_password)
     staff.role = payload.role
     staff.is_active = payload.is_active
     db.add(staff)
     db.commit()
     db.refresh(staff)
     return staff
+
+
+def create_catalog_item(db: Session, payload: CatalogCreateIn) -> dict:
+    validate_cook_open()
+    name = payload.name
+    if payload.kind in {"juice", "ingredient", "supply"}:
+        item = db.scalar(select(Ingredient).where(Ingredient.name == name))
+        if item:
+            item.is_active = True
+        else:
+            item = Ingredient(name=name, is_active=True)
+            db.add(item)
+        if payload.kind == "juice":
+            category = db.scalar(select(ExtraCategory).where(ExtraCategory.name == "Jugos"))
+            if not category:
+                category = ExtraCategory(name="Jugos")
+                db.add(category)
+                db.flush()
+            if not db.scalar(select(Extra).where(Extra.category_id == category.id, Extra.name == name)):
+                db.add(Extra(category_id=category.id, name=name, requires_egg_prep=False, is_active=True))
+    elif payload.kind == "egg":
+        item = db.scalar(select(EggPrepType).where(EggPrepType.name == name))
+        if item:
+            item.is_active = True
+        else:
+            db.add(EggPrepType(name=name, is_active=True))
+    else:
+        category_name = "Pan" if payload.kind == "bread" else "Ensaladas"
+        category = db.scalar(select(ExtraCategory).where(ExtraCategory.name == category_name))
+        if not category:
+            category = ExtraCategory(name=category_name)
+            db.add(category)
+            db.flush()
+        item = db.scalar(select(Extra).where(Extra.category_id == category.id, Extra.name == name))
+        if item:
+            item.is_active = True
+        else:
+            db.add(Extra(category_id=category.id, name=name, requires_egg_prep=False, is_active=True))
+    db.commit()
+    return {"ok": True}
 
 
 def purge_all_order_data(db: Session) -> dict:
