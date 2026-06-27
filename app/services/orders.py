@@ -225,10 +225,9 @@ def create_draft_order(db: Session, payload: OrderCreateIn) -> Order:
         if not egg_prep or not egg_prep.is_active:
             raise HTTPException(status_code=422, detail="Preparacion de huevo no disponible")
 
-    juice_quantity = sum(drink.quantity for drink in payload.included_drinks if drink.kind == "juice")
-    coffee_quantity = sum(drink.quantity for drink in payload.included_drinks if drink.kind == "coffee")
-    if not 1 <= juice_quantity <= 2 or not 1 <= coffee_quantity <= 2:
-        raise HTTPException(status_code=422, detail="Debe seleccionar entre 1 y 2 jugos y entre 1 y 2 cafes")
+    drink_quantity = sum(drink.quantity for drink in payload.included_drinks)
+    if not 1 <= drink_quantity <= 2:
+        raise HTTPException(status_code=422, detail="Debe seleccionar entre 1 y 2 bebidas incluidas")
     juice_category = db.scalar(select(ExtraCategory).where(ExtraCategory.name == "Jugos"))
     active_juice_names = {extra.name for extra in (juice_category.extras if juice_category else []) if extra.is_active}
     for drink in payload.included_drinks:
