@@ -71,9 +71,9 @@ INGREDIENTS = [
 ]
 
 DEFAULT_STAFF = [
-    ("Cocinera turno manana", "00000001", "cocina", "Cocina"),
-    ("Recepcion principal", "00000002", "recepcion", "Recepción"),
-    ("Gerencia Hotel Cacique", "00000003", "gerencia", "Gerencia"),
+    ("Cocinera turno manana", "47382916", "cocina", "Cocina"),
+    ("Recepcion principal", "61827495", "recepcion", "Recepción"),
+    ("Gerencia Hotel Cacique", "70593148", "gerencia", "Gerencia"),
 ]
 
 
@@ -114,8 +114,12 @@ def seed_database(db: Session) -> None:
     existing_usernames = {username for (username,) in db.execute(select(StaffUser.username)).all()}
     existing_dnis = {dni for (dni,) in db.execute(select(StaffUser.dni)).all()}
     for name, dni, username, role in DEFAULT_STAFF:
-        existing = db.scalar(select(StaffUser).where(StaffUser.dni == dni))
+        existing = db.scalar(select(StaffUser).where(StaffUser.username == username))
+        if not existing:
+            existing = db.scalar(select(StaffUser).where(StaffUser.dni == dni))
         if existing:
+            existing.name = existing.name or name
+            existing.dni = dni
             existing.username = existing.username or username
             existing.password_hash = existing.password_hash or hash_password(settings.staff_password)
             existing.role = role
