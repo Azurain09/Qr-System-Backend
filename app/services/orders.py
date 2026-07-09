@@ -40,8 +40,7 @@ STATUS_ALIASES = {
 }
 CANCELLATION_REASONS = [
     "Solicitud del huésped",
-    "Cambios de planes",
-    "Otro motivo",
+    "Razón operativa",
 ]
 EXTRA_PRICES = {
     "Solo": 2,
