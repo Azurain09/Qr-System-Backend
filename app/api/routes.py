@@ -265,7 +265,14 @@ async def staff_create_catalog_item(slug: str, payload: CatalogCreateIn, request
 
 
 @router.get("/reports/{slug}/daily")
-def report_daily(slug: str, request: Request, date: str | None = None, db: Session = Depends(get_db)) -> dict:
+def report_daily(
+    slug: str,
+    request: Request,
+    date: str | None = None,
+    period: str = "daily",
+    consumption_type: str = "all",
+    db: Session = Depends(get_db),
+) -> dict:
     if slug == settings.reception_slug:
         require_slug("reception", slug)
         require_staff_token(request, "reception")
@@ -274,11 +281,18 @@ def report_daily(slug: str, request: Request, date: str | None = None, db: Sessi
         require_staff_token(request, "manager")
     else:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
-    return daily_report(db, date).model_dump()
+    return daily_report(db, date, period, consumption_type).model_dump()
 
 
 @router.get("/reports/{slug}/dashboard")
-def report_dashboard(slug: str, request: Request, date: str | None = None, db: Session = Depends(get_db)) -> dict:
+def report_dashboard(
+    slug: str,
+    request: Request,
+    date: str | None = None,
+    period: str = "daily",
+    consumption_type: str = "all",
+    db: Session = Depends(get_db),
+) -> dict:
     if slug == settings.reception_slug:
         require_slug("reception", slug)
         require_staff_token(request, "reception")
@@ -290,11 +304,18 @@ def report_dashboard(slug: str, request: Request, date: str | None = None, db: S
         require_staff_token(request, "cook")
     else:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
-    return dashboard_report(db, date)
+    return dashboard_report(db, date, period, consumption_type)
 
 
 @router.get("/reports/{slug}/daily.xlsx")
-def report_daily_xlsx(slug: str, request: Request, date: str | None = None, db: Session = Depends(get_db)) -> StreamingResponse:
+def report_daily_xlsx(
+    slug: str,
+    request: Request,
+    date: str | None = None,
+    period: str = "daily",
+    consumption_type: str = "all",
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
     if slug == settings.reception_slug:
         require_slug("reception", slug)
         require_staff_token(request, "reception")
@@ -303,7 +324,7 @@ def report_daily_xlsx(slug: str, request: Request, date: str | None = None, db: 
         require_staff_token(request, "manager")
     else:
         raise HTTPException(status_code=404, detail="Ruta no encontrada")
-    report = daily_report(db, date)
+    report = daily_report(db, date, period, consumption_type)
     output = report_to_excel(report)
     filename = f"qr-system-reporte-{report.date}.xlsx"
     return StreamingResponse(
