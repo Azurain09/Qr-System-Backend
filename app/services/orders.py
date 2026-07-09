@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import timedelta
+from datetime import date, timedelta
 import json
 
 from fastapi import HTTPException
@@ -389,18 +389,54 @@ def cancel_extra(db: Session, detail_id: int, reason: str) -> Order:
     return get_order_or_404(db, detail.order_id)
 
 
-def daily_report(db: Session, date_value: str | None = None) -> ReportOut:
-    cleanup_expired_drafts(db)
-    report_date = date_value or now_lima().date().isoformat()
-    orders = db.scalars(order_query().where(Order.status != INTERNAL_DRAFT_STATUS)).unique().all()
-    filtered = [
+REPORT_PERIOD_DAYS = {
+    "daily": 1,
+    "weekly": 7,
+    "biweekly": 15,
+    "monthly": 30,
+    "quarterly": 90,
+}
+
+REPORT_CONSUMPTION_TYPES = {"all", "included", "extras"}
+
+
+def report_date_range(date_value: str | None = None, period: str = "daily") -> tuple[date, date, str]:
+    end_date = date.fromisoformat(date_value) if date_value else now_lima().date()
+    days = REPORT_PERIOD_DAYS.get(period, REPORT_PERIOD_DAYS["daily"])
+    start_date = end_date - timedelta(days=days - 1)
+    label = end_date.isoformat() if days == 1 else f"{start_date.isoformat()} a {end_date.isoformat()}"
+    return start_date, end_date, label
+
+
+def orders_in_report_range(orders: list[Order], date_value: str | None = None, period: str = "daily") -> tuple[list[Order], str]:
+    start_date, end_date, label = report_date_range(date_value, period)
+    return [
         order
         for order in orders
-        if (order.confirmed_at or order.created_at).date().isoformat() == report_date
-    ]
+        if start_date <= (order.confirmed_at or order.created_at).date() <= end_date
+    ], label
+
+
+def order_has_active_extras(order: Order) -> bool:
+    return any(not detail.is_cancelled for detail in order.extra_details)
+
+
+def filter_orders_by_consumption(orders: list[Order], consumption_type: str = "all") -> list[Order]:
+    if consumption_type == "extras":
+        return [order for order in orders if order_has_active_extras(order)]
+    return orders
+
+
+def daily_report(db: Session, date_value: str | None = None, period: str = "daily", consumption_type: str = "all") -> ReportOut:
+    cleanup_expired_drafts(db)
+    if consumption_type not in REPORT_CONSUMPTION_TYPES:
+        consumption_type = "all"
+    orders = db.scalars(order_query().where(Order.status != INTERNAL_DRAFT_STATUS)).unique().all()
+    ranged_orders, report_date = orders_in_report_range(orders, date_value, period)
+    filtered = filter_orders_by_consumption(ranged_orders, consumption_type)
 
     origin = Counter(order.delivery_location for order in filtered)
-    breakfasts = Counter(order.breakfast_detail.breakfast_type.name for order in filtered)
+    breakfasts = Counter()
     extras = Counter()
     extra_details: list[dict] = []
     peak_hours = Counter()
@@ -411,10 +447,14 @@ def daily_report(db: Session, date_value: str | None = None) -> ReportOut:
         peak_hours[f"{event_time.hour:02d}:00"] += 1
         if order.cancellation_reason:
             cancellations[order.cancellation_reason] += 1
+        if consumption_type in {"all", "included"}:
+            breakfasts[order.breakfast_detail.breakfast_type.name] += 1
         for detail in order.extra_details:
             if detail.is_cancelled:
                 if detail.cancellation_reason:
                     cancellations[detail.cancellation_reason] += detail.quantity
+                continue
+            if consumption_type == "included":
                 continue
             extras[detail.extra.name] += detail.quantity
             unit_price = EXTRA_PRICES.get(detail.extra.name, 0)
@@ -441,14 +481,13 @@ def daily_report(db: Session, date_value: str | None = None) -> ReportOut:
     )
 
 
-def dashboard_report(db: Session, date_value: str | None = None) -> dict:
+def dashboard_report(db: Session, date_value: str | None = None, period: str = "daily", consumption_type: str = "all") -> dict:
     cleanup_expired_drafts(db)
+    if consumption_type not in REPORT_CONSUMPTION_TYPES:
+        consumption_type = "all"
     all_orders = db.scalars(order_query().where(Order.status != INTERNAL_DRAFT_STATUS)).unique().all()
-    orders = [
-        order
-        for order in all_orders
-        if not date_value or (order.confirmed_at or order.created_at).date().isoformat() == date_value
-    ]
+    ranged_orders, report_date = orders_in_report_range(all_orders, date_value, period)
+    orders = filter_orders_by_consumption(ranged_orders, consumption_type)
     category_names = ["Desayunos", "Bebidas", "Panes", "Huevos", "Otros"]
     status_labels = ["Completados", "En preparación"]
     status_by_category = {category: {status: 0 for status in status_labels} for category in category_names}
@@ -474,9 +513,10 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
         if order.table_number:
             active_tables[f"Mesa {order.table_number}"] += 1
         order_status_group = "Completados" if order.status == "Entregado" else "En preparación"
-        category_mix["Desayunos"] += 1
-        status_by_category["Desayunos"][order_status_group] += 1
-        top_products[order.breakfast_detail.breakfast_type.name] += 1
+        if consumption_type in {"all", "included"}:
+            category_mix["Desayunos"] += 1
+            status_by_category["Desayunos"][order_status_group] += 1
+            top_products[order.breakfast_detail.breakfast_type.name] += 1
         if order.status == "Entregado" and order.confirmed_at:
             delivered_history = [entry for entry in order.history if entry.status == "Entregado"]
             if delivered_history:
@@ -484,6 +524,8 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
                 completed_minutes.append(minutes)
         for detail in order.extra_details:
             if detail.is_cancelled:
+                continue
+            if consumption_type == "included":
                 continue
             mapped = category_for_extra(detail.extra.category.name)
             category_mix[mapped] += detail.quantity
@@ -505,7 +547,9 @@ def dashboard_report(db: Session, date_value: str | None = None) -> dict:
         "top_products": [{"name": name, "quantity": quantity} for name, quantity in top_products.most_common(5)],
         "active_tables": [{"name": name, "orders": quantity} for name, quantity in active_tables.most_common(5)],
         "latest_cancellations": latest_cancellations[-5:],
-        "date": date_value or "historico",
+        "date": report_date,
+        "period": period,
+        "consumption_type": consumption_type,
     }
 
 
