@@ -1,8 +1,12 @@
 from dataclasses import dataclass
 from datetime import time
 import os
-import secrets
 from zoneinfo import ZoneInfo
+
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -33,9 +37,9 @@ class Settings:
     reception_slug: str = "recepcion-sol-3186"
     manager_slug: str = "gerencia-cacique-9051"
     force_open_24h: bool = env_flag("FORCE_OPEN_24H", False)
-    # Deployed environments must provide their own values through environment variables.
-    staff_password: str = os.getenv("STAFF_PASSWORD", "local-development-only")
-    staff_token_secret: str = os.getenv("STAFF_TOKEN_SECRET") or secrets.token_urlsafe(32)
+    # Authentication values must be supplied through environment variables.
+    staff_password: str = os.getenv("STAFF_PASSWORD", "")
+    staff_token_secret: str = os.getenv("STAFF_TOKEN_SECRET", "")
     staff_token_minutes: int = int(os.getenv("STAFF_TOKEN_MINUTES", "480"))
     max_request_bytes: int = int(os.getenv("MAX_REQUEST_BYTES", "1048576"))
     allowed_origins: list[str] = None
@@ -45,6 +49,8 @@ class Settings:
     )
 
     def __post_init__(self) -> None:
+        if not self.staff_password or not self.staff_token_secret:
+            raise RuntimeError("STAFF_PASSWORD and STAFF_TOKEN_SECRET must be configured")
         object.__setattr__(
             self,
             "allowed_origins",
