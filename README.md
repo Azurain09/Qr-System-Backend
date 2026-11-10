@@ -2,6 +2,10 @@
 
 FastAPI service for a hotel breakfast ordering system. It supports QR-driven orders, authenticated staff workflows, real-time operational updates, reports, and Excel exports.
 
+## Architecture preview
+
+<img src="assets/architecture.svg" alt="QR System backend architecture diagram" width="900" />
+
 ## Highlights
 
 - REST API built with FastAPI.
