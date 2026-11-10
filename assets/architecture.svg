@@ -8,7 +8,8 @@
     <rect x="70" y="205" width="225" height="148" rx="12" fill="#172554" stroke="#38bdf8" stroke-width="2"/>
     <text x="96" y="252" fill="#7dd3fc" font-size="16" font-weight="700">CLIENTS</text>
     <text x="96" y="287" fill="#f8fafc" font-size="21">Guest QR flow</text>
-    <text x="96" y="320" fill="#cbd5e1" font-size="17">Kitchen · Reception · Manager</text>
+    <text x="96" y="317" fill="#cbd5e1" font-size="17">Kitchen · Reception</text>
+    <text x="96" y="342" fill="#cbd5e1" font-size="17">Management</text>
 
     <rect x="455" y="155" width="290" height="250" rx="12" fill="#123047" stroke="#2dd4bf" stroke-width="2"/>
     <text x="483" y="205" fill="#5eead4" font-size="16" font-weight="700">APPLICATION LAYER</text>
@@ -19,8 +20,9 @@
 
     <rect x="905" y="205" width="225" height="148" rx="12" fill="#2d214f" stroke="#a78bfa" stroke-width="2"/>
     <text x="932" y="252" fill="#c4b5fd" font-size="16" font-weight="700">PERSISTENCE</text>
-    <text x="932" y="290" fill="#f8fafc" font-size="22">SQLAlchemy + SQLite</text>
-    <text x="932" y="321" fill="#ddd6fe" font-size="17">Orders · Catalog · Staff</text>
+    <text x="932" y="282" fill="#f8fafc" font-size="20">SQLAlchemy</text>
+    <text x="932" y="309" fill="#f8fafc" font-size="20">+ SQLite</text>
+    <text x="932" y="336" fill="#ddd6fe" font-size="16">Orders · Catalog · Staff</text>
 
     <path d="M310 279 H420" stroke="#38bdf8" stroke-width="4" fill="none"/>
     <path d="M420 279 l-14 -10 v20 z" fill="#38bdf8"/>
